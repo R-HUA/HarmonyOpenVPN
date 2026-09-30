@@ -1,0 +1,77 @@
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+const ts=require(path.join(process.env.DEVECO_CLI_CLT_PATH||'C:/Program Files/command-line-tools','arktsdoc/node_modules/typescript/lib/typescript.js'));
+const code=ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/extability/OvpnExtAbility.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText;
+function harness(){
+ const calls=[],events=[],logs=[];let args,fd=100,finishStop;
+ const vpn={protectProcessNet:async()=>{calls.push(['protectProcess'])},create:async(c)=>{calls.push(['create',c]);return ++fd},destroy:async()=>{calls.push(['destroy'])},protect:async(f)=>{calls.push(['protect',f])}};
+ const native={startVpn:(...a)=>{calls.push(['start']);args=a},stopVpn:()=>{calls.push(['stop']);return new Promise(resolve=>{finishStop=resolve})}};
+ const common={createSubscriber:(o,cb)=>cb(null,{}),subscribe:()=>{},unsubscribe:()=>{},publish:(e,o,cb)=>{events.push([e,o.data]);cb()}};
+ const requireMock=(name)=>{
+  if(name==='../model/NetworkMonitor') return {NetworkMonitor:class {async start(){} async release(){} stop(){calls.push(['monitorStop'])}}};
+  if(name==='../model/HandoverRetry') {const c={exports:{},Date};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/model/HandoverRetry.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,c);return c.exports;}
+  if(name==='../model/Diagnostics') { const c={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/model/Diagnostics.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,c);return c.exports;}
+  if(name==='@kit.BasicServicesKit')return {commonEventManager:common};
+  if(name==='@kit.AbilityKit')return {bundleManager:{BundleFlag:{GET_BUNDLE_INFO_DEFAULT:0},getBundleInfoForSelf:async()=>({name:'test.vpn'})}};
+  if(name==='@kit.NetworkKit')return {VpnExtensionAbility:class {context={filesDir:'/mock'}},vpnExtension:{createVpnConnection:()=>vpn}};
+  if(name==='@kit.CoreFileKit')return {fileIo:{OpenMode:{CREATE:1,APPEND:2,WRITE_ONLY:4},stat:async()=>({size:0}),open:async()=>({fd:7}),write:async(fd,text)=>{logs.push(text)},truncate:async()=>{},close:async(f)=>{if((typeof f==='number'?f:f.fd)!==7)calls.push(['close',f])}}};
+  if(name==='libvpn_client.so')return {default:native};throw Error(name);
+ };
+ const ctx={exports:{},require:requireMock};vm.runInNewContext(code,ctx);
+ const ability=new ctx.exports.default();
+ return {ability,calls,events,logs,vpn,get args(){return args},resolveStop(){finishStop()}};
+}
+(async()=>{
+ const h=harness();const want={parameters:{cfg:JSON.stringify({profileName:'test.ovpn',content:'client'})}};
+ await h.ability.onCreate(want);h.ability.onRequest(want,2);
+ assert.equal(h.calls.filter(x=>x[0]==='start').length,1);console.log('PASS duplicate authorization request starts one core');
+ assert.deepEqual(h.calls.slice(0,2).map(x=>x[0]),['protectProcess','start']);console.log('PASS resolver/process protected before native network access');
+ await h.args[1](9);assert.equal(h.calls.at(-1)[0],'protect');console.log('PASS protect awaits platform completion');
+ const a=JSON.stringify({addresses:['10.0.0.2'],routes:['10.0.0.0/24']});
+ assert.equal(await h.args[2](a),101);assert.equal(await h.args[2](a),101);
+ assert.equal(h.calls.filter(x=>x[0]==='create').length,1);console.log('PASS unchanged TUN reused');
+ const b=JSON.stringify({addresses:['10.8.0.2'],routes:['0.0.0.0/0']});
+ assert.equal(await h.args[2](b),102);
+ assert.deepEqual(h.calls.slice(-4).map(x=>x[0]),['destroy','close','protectProcess','create']);console.log('PASS changed pushed config rebuilds platform TUN');
+ h.args[3](JSON.stringify({name:'RECONNECTING',info:''}));assert.equal(h.events.at(-1)[0],'ovpn.RECONNECTING');console.log('PASS reconnect state forwarded');
+ h.ability.onDestroy();h.ability.onDestroy();
+ assert.equal(h.calls.filter(x=>x[0]==='stop').length,1);
+ assert.equal(h.calls.filter(x=>x[0]==='destroy').length,1);
+ assert.equal(await h.args[2](b),-1);console.log('PASS stop is idempotent and rejects new TUN work');
+ h.resolveStop();await h.ability.destroy();
+ assert.deepEqual(h.calls.slice(-2).map(x=>x[0]),['destroy','close']);
+ assert.equal(h.events.at(-1)[0],'ovpn.DESTROY');console.log('PASS native shutdown precedes platform teardown');
+ const late=harness();await late.ability.onCreate(want);let resolveCreate;
+ late.vpn.create=()=>new Promise(resolve=>{resolveCreate=resolve});
+ const pending=late.args[2](a);await Promise.resolve();await Promise.resolve();
+ late.ability.onDestroy();late.resolveStop();resolveCreate(321);
+ assert.equal(await pending,-1);await late.ability.destroy();
+ assert.equal(late.calls.filter(x=>x[0]==='close'&&x[1]===321).length,1);console.log('PASS late create completion cannot resurrect a stopped tunnel');
+ const failed=harness();await failed.ability.onCreate(want);
+ failed.args[3](JSON.stringify({name:'LOG',info:'TLS handshake starting'}));
+ failed.args[6]('');
+ assert(failed.events.some(x=>x[0]==='ovpn.ERROR'&&x[1].trim().length>0));
+ failed.resolveStop();await failed.ability.destroy();
+ assert(failed.logs.some(x=>x.includes('TLS handshake starting')));
+ console.log('PASS empty native reason becomes a visible failure');
+ console.log('PASS native diagnostic messages reach the persistent log');
+ const blocked=harness();blocked.vpn.protectProcessNet=async()=>{throw {code:2200003,message:'System internal error'}};
+ await blocked.ability.onCreate(want);
+ assert(!blocked.calls.some(x=>x[0]==='start'));
+ assert(blocked.events.some(x=>x[0]==='ovpn.ERROR'&&x[1].includes('[2200003]')));
+ blocked.resolveStop();await blocked.ability.destroy();
+ console.log('PASS failed process protection stops startup and retains system code');
+ const createFail=harness();await createFail.ability.onCreate(want);
+ createFail.vpn.create=async()=>{throw {code:2200003,message:'System internal error'}};
+ assert.equal(await createFail.args[2](a),-1);
+ assert(createFail.events.some(x=>x[0]==='ovpn.ERROR'&&x[1].includes('(create)')||x[0]==='ovpn.ERROR'&&x[1].includes('（create）')));
+ assert.equal(await createFail.args[2](a),-1);
+ createFail.resolveStop();await createFail.ability.destroy();
+ console.log('PASS failed create terminates session rather than repeated rebuilds');
+ const stats=harness();await stats.ability.onCreate(want);
+ stats.args[5](JSON.stringify({bytesIn:42,bytesOut:71,transportBytesIn:90,transportBytesOut:95}));
+ await stats.ability.logWork;
+ assert(stats.logs.some(x=>x.includes('DATA_COUNTERS')&&x.includes('transportBytesIn')));
+ stats.ability.onDestroy();stats.resolveStop();await stats.ability.destroy();
+ console.log('PASS transport and TUN counters persisted for offline diagnosis');
+ console.log('14 lifecycle regression cases passed (mock platform/native boundary)');
+})().catch(error=>{console.error(error);process.exitCode=1});

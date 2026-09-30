@@ -1,0 +1,14 @@
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('node:assert/strict');
+const ts=require(path.join(process.env.DEVECO_CLI_CLT_PATH||'C:/Program Files/command-line-tools','arktsdoc/node_modules/typescript/lib/typescript.js'));
+let now=1000,retries=0;
+const ctx={exports:{},Date:{now:()=>now}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../entry/src/main/ets/model/HandoverRetry.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,ctx);
+const policy=new ctx.exports.HandoverRetry(()=>retries++,()=>{});
+policy.observe(5);policy.arm();policy.observe(5);assert.equal(retries,0);
+policy.observe(6);policy.observe(6);assert.equal(retries,1);
+policy.observe(7);policy.observe(8);assert.equal(retries,2);
+console.log('PASS historical DNS errors ignored and early retries capped at two');
+policy.arm();now+=15000;policy.observe(9);assert.equal(retries,2);
+console.log('PASS handover retry window expires');
+policy.arm();policy.finish();policy.observe(10);assert.equal(retries,2);
+console.log('PASS connected/offline/stopped cancellation disables fast retry');

@@ -1,0 +1,55 @@
+{
+  "upstream": {
+    "repository": "https://github.com/jseparator/ovpn-ohos.git",
+    "commit": "729d5bf5dab2dc611e830d066f87ee7a5c8dac51"
+  },
+  "dependencies": [
+    {
+      "name": "openvpn3",
+      "path": "entry/src/main/cpp/openvpn3",
+      "repository": "https://github.com/jseparator/openvpn3.git",
+      "commit": "df5d9ba9561c54c953d1c691a67373db8f76a6bf"
+    },
+    {
+      "name": "mbedtls",
+      "path": "third_party/mbedtls",
+      "repository": "https://github.com/Mbed-TLS/mbedtls.git",
+      "commit": "068ff080b369adfac81509f9b57b2afabaf82dc5",
+      "version": "3.6.7"
+    },
+    {
+      "name": "framework",
+      "path": "third_party/mbedtls/framework",
+      "repository": "https://github.com/Mbed-TLS/mbedtls-framework.git",
+      "commit": "dde0c4a0e448a0552f18817dcea633bb851fd288"
+    },
+    {
+      "name": "jsoncpp",
+      "path": "third_party/jsoncpp",
+      "repository": "https://github.com/open-source-parsers/jsoncpp.git",
+      "commit": "89e2973c754a9c02a49974d839779b151e95afd6",
+      "version": "1.9.6"
+    },
+    {
+      "name": "fmt",
+      "path": "third_party/fmt",
+      "repository": "https://github.com/fmtlib/fmt.git",
+      "commit": "40626af88bd7df9a5fb80be7b25ac85b122d6c21",
+      "version": "11.2.0"
+    },
+    {
+      "name": "asio",
+      "path": "third_party/asio",
+      "repository": "https://github.com/chriskohlhoff/asio.git",
+      "commit": "12e0ce9e0500bf0f247dbd1ae894272656456079",
+      "version": "1.30.2"
+    },
+    {
+      "name": "lz4",
+      "path": "third_party/lz4",
+      "repository": "https://github.com/lz4/lz4.git",
+      "commit": "ebb370ca83af193212df4dcbadcc5d87bc0de2f0",
+      "version": "1.10.0"
+    }
+  ]
+}

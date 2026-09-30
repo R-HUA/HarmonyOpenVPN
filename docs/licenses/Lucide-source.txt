@@ -1,0 +1,4 @@
+lucide-static 1.48.0
+https://www.npmjs.com/package/lucide-static/v/1.48.0
+https://github.com/lucide-icons/lucide
+SVG stroke color adapted for this app.
